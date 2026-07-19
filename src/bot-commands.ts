@@ -146,7 +146,11 @@ async function removeKeywordSubscription(db: D1Database, userId: number, subId: 
 
 // 创建Bot处理函数
 export function createBotWithCommands(token: string, db: D1Database) {
-  const bot = new Bot(token)
+  const bot = new Bot(token, {
+    client: {
+      fetch: (input: RequestInfo | URL, init?: RequestInit) => fetch(input, init),
+    },
+  })
 
   // /start 命令
   bot.command('start', async (ctx) => {

@@ -19,14 +19,22 @@ app.post('/webhook', async (c) => {
     return c.json({ error: 'Service is not configured' }, 503)
   }
 
-  const telegramSecret = c.req.header('X-Telegram-Bot-Api-Secret-Token') ?? null
+  const telegramSecret = c.req.raw.headers.get('X-Telegram-Bot-Api-Secret-Token')
   if (!constantTimeEqual(telegramSecret, c.env.TELEGRAM_WEBHOOK_SECRET)) {
+    console.warn('Rejected Telegram webhook authentication', {
+      headerPresent: Boolean(telegramSecret),
+      receivedLength: telegramSecret?.length ?? 0,
+      configuredLength: c.env.TELEGRAM_WEBHOOK_SECRET.length,
+    })
     return c.json({ error: 'Unauthorized' }, 401)
   }
 
   try {
     const bot = createBotWithCommands(c.env.BOT_TOKEN, c.env.DB)
-    return await webhookCallback(bot, 'hono')(c)
+    return await webhookCallback(bot, 'hono', {
+      secretToken: c.env.TELEGRAM_WEBHOOK_SECRET,
+      timeoutMilliseconds: 9_000,
+    })(c)
   } catch (error) {
     console.error('Telegram webhook failed:', error)
     return c.json({ error: 'Internal server error' }, 500)
