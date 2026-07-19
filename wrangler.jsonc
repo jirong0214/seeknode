@@ -12,10 +12,11 @@
   //   "BOT_TOKEN": "YOUR_ACTUAL_BOT_TOKEN_HERE",
   //   "START_COMMAND": "start"
   // },
-  // 定时任务配置 - RSS监控
+  // 定时任务：RSS监控每5分钟运行；每天清理一次过期数据
   "triggers": {
     "crons": [
-      "*/1 * * * *"  // 每1分钟执行一次RSS监控
+      "*/5 * * * *",
+      "17 3 * * *"
     ]
   },
   // "kv_namespaces": [
@@ -36,7 +37,7 @@
     {
       "binding": "DB",
       "database_name": "seeknode",
-      "database_id": "204bb3de-b4e3-4644-a0f4-904dec87a993"
+      "database_id": "107db7fd-b7d0-4500-8e0a-cf50249b739b"
     }
   ],
   // "ai": {
