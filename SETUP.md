@@ -1,119 +1,86 @@
-# 系统初始化指南
+# 部署与迁移
 
-## 概述
+## 1. 数据库选择
 
-RSS监控机器人提供了一个简单易用的系统初始化页面，帮助您快速完成系统设置。
+如果旧 D1 中已经积累了数十万条 `is_push = 0` 记录，推荐新建数据库。旧库创建复合索引本身会产生大量一次性读写，在 Free 套餐上可能无法在一天内完成。
 
-## 使用方法
+新建数据库：
 
-访问 `/setup` 路径即可进入系统初始化页面：
-
-```
-https://your-domain.com/setup
+```bash
+npx wrangler d1 create seeknode
 ```
 
-系统将按以下步骤自动进行设置：
+把返回的 `database_id` 填入 `wrangler.jsonc`，然后应用迁移：
 
-### 步骤1：检查Bot Token
-- 验证环境变量中的`BOT_TOKEN`是否有效
-- 获取机器人基本信息（用户名、ID等）
+```bash
+npx wrangler d1 migrations apply seeknode --remote
+```
 
-### 步骤2：设置Webhook
-- 根据当前域名自动设置Telegram Webhook
-- Webhook地址：`https://your-domain.com/webhook`
+保留旧数据库时，先备份，再应用 `0002_optimize_d1.sql`。迁移不会批量更新或删除旧数据；新索引建立后，队列会每次处理 50 条旧记录。
 
-### 步骤3：检查数据库
-- 检查D1数据库中是否存在所需的表
-- 如果表不存在，自动创建所有必需的表
+## 2. 配置密钥
 
-## 数据库表结构
+生成两个独立的随机密钥，例如：
 
-系统会自动创建以下4个表：
+```bash
+openssl rand -hex 32
+```
 
-### posts 表
-存储RSS帖子信息
-- `id` - 主键
-- `post_id` - 帖子ID  
-- `title` - 标题
-- `content` - 内容
-- `pub_date` - 发布时间
-- `category` - 分类
-- `creator` - 作者
-- `is_push` - 是否已推送
-- `created_at` - 创建时间
+配置 Worker secrets：
 
-### users 表
-存储用户信息
-- `id` - 主键
-- `chat_id` - Telegram聊天ID
-- `username` - 用户名
-- `first_name` - 名字
-- `last_name` - 姓氏
-- `max_sub` - 最大订阅数（默认5）
-- `is_active` - 是否活跃
-- `created_at` - 创建时间
-- `updated_at` - 更新时间
+```bash
+npx wrangler secret put BOT_TOKEN
+npx wrangler secret put TELEGRAM_WEBHOOK_SECRET
+npx wrangler secret put ADMIN_TOKEN
+```
 
-### keywords_sub 表
-存储关键词订阅
-- `id` - 主键
-- `user_id` - 用户ID
-- `keywords_count` - 关键词数量
-- `keyword1` - 关键词1
-- `keyword2` - 关键词2
-- `keyword3` - 关键词3
-- `is_active` - 是否活跃
-- `created_at` - 创建时间
-- `updated_at` - 更新时间
+- `BOT_TOKEN`：从 BotFather 获取。
+- `TELEGRAM_WEBHOOK_SECRET`：Telegram 调用 `/webhook` 时携带的校验密钥。
+- `ADMIN_TOKEN`：调用 `/admin/*` 时使用；必须和 Webhook secret 不同。
 
-### push_logs 表
-存储推送日志
-- `id` - 主键
-- `user_id` - 用户ID
-- `chat_id` - 聊天ID
-- `post_id` - 帖子ID
-- `sub_id` - 订阅ID
-- `push_status` - 推送状态
-- `error_message` - 错误信息
-- `created_at` - 创建时间
+不要把这些值写入 `wrangler.jsonc` 或提交到 Git。
 
-## 环境变量配置
+## 3. 部署 Worker
 
-确保在Cloudflare Worker中配置以下环境变量：
+```bash
+corepack pnpm install
+corepack pnpm typecheck
+corepack pnpm test
+npx wrangler deploy
+```
 
-- `BOT_TOKEN` - Telegram Bot Token（从@BotFather获取）
-- `DB` - D1数据库绑定
+部署配置包含两个 Cron：
 
-## API端点
+- `*/5 * * * *`：每 5 分钟抓取 RSS 并处理推送。
+- `17 3 * * *`：每天 UTC 03:17 分批清理 90 天前的数据。
 
-如果需要程序化访问，可以使用以下API：
+不要再配置外部定时服务调用 HTTP 路由。
 
-- `GET /setup/check` - 检查Bot Token状态
-- `POST /setup/webhook` - 设置Webhook
-- `POST /setup/database` - 检查和创建数据库表
+## 4. 设置 Telegram Webhook
 
-## 故障排除
+```bash
+curl -X POST "https://<worker-domain>/admin/webhook" \
+  -H "Authorization: Bearer <ADMIN_TOKEN>"
+```
 
-### Bot Token错误
-- 确保`BOT_TOKEN`环境变量已正确设置
-- 检查Token格式是否正确
-- 确认机器人未被删除或禁用
+接口会把 Telegram Webhook 设置为当前域名的 `/webhook`，同时注册 `TELEGRAM_WEBHOOK_SECRET`。
 
-### Webhook设置失败
-- 检查域名是否可访问
-- 确认HTTPS证书有效
-- 检查Telegram API限制
+检查受保护的配置状态：
 
-### 数据库错误
-- 确认D1数据库已创建并绑定
-- 检查数据库权限设置
-- 查看详细错误信息
+```bash
+curl "https://<worker-domain>/admin/status" \
+  -H "Authorization: Bearer <ADMIN_TOKEN>"
+```
 
-## 完成设置
+## 5. 观察 D1 使用量
 
-当所有步骤显示为绿色✅时，系统设置完成，机器人即可正常使用。
+```bash
+npx wrangler d1 insights seeknode \
+  --sort-type=sum \
+  --sort-by=reads \
+  --sort-direction=DESC \
+  --limit=10 \
+  --timePeriod=1d
+```
 
-用户可以：
-- 向机器人发送`/start`命令开始使用
-- 使用`/add`命令添加关键词订阅
-- 查看`/help`获取更多帮助信息 
+正常情况下，待处理查询每次最多返回 50 条，不应再随 `posts` 表总行数增长。

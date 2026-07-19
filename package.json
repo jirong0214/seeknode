@@ -7,19 +7,19 @@
     "deploy:staging": "wrangler deploy --config wrangler.staging.jsonc --minify",
     "deploy:prod": "wrangler deploy --config wrangler.prod.jsonc --minify",
     "cf-typegen": "wrangler types --env-interface CloudflareBindings",
-    "db:create:dev": "wrangler d1 create seeknode-dev",
-    "db:create:staging": "wrangler d1 create seeknode-staging", 
-    "db:create:prod": "wrangler d1 create seeknode-prod",
-    "db:migrate:dev": "wrangler d1 migrations apply seeknode-dev --config wrangler.dev.jsonc",
-    "db:migrate:staging": "wrangler d1 migrations apply seeknode-staging --config wrangler.staging.jsonc",
-    "db:migrate:prod": "wrangler d1 migrations apply seeknode-prod --config wrangler.prod.jsonc"
+    "db:create": "wrangler d1 create seeknode",
+    "db:migrate": "wrangler d1 migrations apply seeknode --remote",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
-    "hono": "^4.7.11",
-    "grammy": "^1.21.1"
+    "grammy": "^1.21.1",
+    "hono": "^4.7.11"
   },
   "devDependencies": {
-    "wrangler": "^4.4.0",
-    "@types/node": "^22.0.0"
+    "@types/node": "^22.0.0",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10",
+    "wrangler": "^4.4.0"
   }
 }

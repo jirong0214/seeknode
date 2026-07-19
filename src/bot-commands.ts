@@ -43,20 +43,26 @@ async function getOrCreateUser(db: D1Database, ctx: Context): Promise<User | nul
       .first() as User | null
     
     if (existingUser) {
-      // 更新用户信息
-      await db.prepare(`
-        UPDATE users SET 
-          username = ?, 
-          first_name = ?, 
-          last_name = ?, 
-          updated_at = CURRENT_TIMESTAMP
-        WHERE chat_id = ?
-      `).bind(
-        user.username || null,
-        user.first_name || null,
-        user.last_name || null,
-        chatId
-      ).run()
+      const username = user.username || null
+      const firstName = user.first_name || null
+      const lastName = user.last_name || null
+
+      // Most bot commands are read-only. Avoid a billed D1 write unless the
+      // Telegram profile data actually changed.
+      if (
+        (existingUser.username || null) !== username ||
+        (existingUser.first_name || null) !== firstName ||
+        (existingUser.last_name || null) !== lastName
+      ) {
+        await db.prepare(`
+          UPDATE users SET
+            username = ?,
+            first_name = ?,
+            last_name = ?,
+            updated_at = CURRENT_TIMESTAMP
+          WHERE chat_id = ?
+        `).bind(username, firstName, lastName, chatId).run()
+      }
       
       return existingUser
     } else {
@@ -183,9 +189,9 @@ export function createBotWithCommands(token: string, db: D1Database) {
       `• \`/add VPS 优惠\` - 监控同时包含"VPS"和"优惠"的帖子\n` +
       `• \`/add 服务器 免费 教程\` - 监控同时包含这三个关键词的帖子\n\n` +
       `⚠️ **注意事项：**\n` +
-      `• 每个用户最多5个订阅\n` +
+      `• 每个用户最多10个订阅\n` +
       `• 关键词匹配不区分大小写\n` +
-      `• 每1分钟检查一次新帖子`
+      `• 每5分钟检查一次新帖子`
     )
   })
 
@@ -285,7 +291,7 @@ export function createBotWithCommands(token: string, db: D1Database) {
         `✅ **订阅添加成功！**\n\n` +
         `🔍 关键词: ${keywords.join(' + ')}\n` +
         `📊 匹配模式: ${keywords.length === 1 ? '单关键词' : '多关键词组合'}\n\n` +
-        `🤖 系统将每1分钟检查一次新帖子，匹配时会自动通知您。`
+        `🤖 系统将每5分钟检查一次新帖子，匹配时会自动通知您。`
       )
     } else {
       return ctx.reply('❌ 添加订阅失败，请稍后重试')
@@ -346,7 +352,7 @@ export function createBotWithCommands(token: string, db: D1Database) {
     return ctx.reply(
       `📊 **服务状态**\n\n` +
       `✅ 机器人状态: 正常运行\n` +
-      `🔄 监控频率: 每1分钟\n` +
+      `🔄 监控频率: 每5分钟\n` +
       `📡 RSS源: NodeSeek\n` +
       `💾 数据库: 正常连接\n` +
       `⏰ 当前时间: ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}\n\n` +
@@ -368,4 +374,4 @@ export function createBotWithCommands(token: string, db: D1Database) {
   })
 
   return bot
-} 
+}

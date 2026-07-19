@@ -1,4 +1,4 @@
--- psots 表
+-- posts 表
 CREATE TABLE IF NOT EXISTS posts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   post_id INTEGER NOT NULL,
@@ -10,8 +10,9 @@ CREATE TABLE IF NOT EXISTS posts (
   is_push INTEGER DEFAULT 0,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
-CREATE INDEX IF NOT EXISTS idx_posts_post_id ON posts(post_id);
-CREATE INDEX IF NOT EXISTS idx_posts_is_push ON posts(is_push);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_posts_post_id ON posts(post_id);
+CREATE INDEX IF NOT EXISTS idx_posts_pending_created ON posts(is_push, created_at);
+CREATE INDEX IF NOT EXISTS idx_posts_created_at ON posts(created_at);
 
 -- users 表
 CREATE TABLE IF NOT EXISTS users (
@@ -27,7 +28,7 @@ CREATE TABLE IF NOT EXISTS users (
 );
 
 -- 为 users 创建索引
-CREATE INDEX IF NOT EXISTS idx_users_chat_id ON users(chat_id);
+-- chat_id UNIQUE already creates the lookup index used by bot commands.
 
 -- keywords_sub 表
 CREATE TABLE IF NOT EXISTS keywords_sub (
@@ -44,6 +45,7 @@ CREATE TABLE IF NOT EXISTS keywords_sub (
 
 -- 为 keywords_sub 创建索引
 CREATE INDEX IF NOT EXISTS idx_keywords_sub_user_id ON keywords_sub(user_id);
+CREATE INDEX IF NOT EXISTS idx_keywords_sub_active_user ON keywords_sub(is_active, user_id);
 
 -- push_logs 表
 CREATE TABLE IF NOT EXISTS push_logs (
@@ -59,6 +61,4 @@ CREATE TABLE IF NOT EXISTS push_logs (
 
 -- 为 push_logs 创建索引和唯一约束
 CREATE UNIQUE INDEX IF NOT EXISTS idx_push_logs_user_chat ON push_logs(chat_id, post_id);
-CREATE INDEX IF NOT EXISTS idx_push_logs_user_id ON push_logs(user_id);
-CREATE INDEX IF NOT EXISTS idx_push_logs_post_id ON push_logs(post_id);
-CREATE INDEX IF NOT EXISTS idx_push_logs_push_status ON push_logs(push_status);
+CREATE INDEX IF NOT EXISTS idx_push_logs_created_at ON push_logs(created_at);

@@ -1,225 +1,66 @@
-# Nodeseek 关键词监控 Telegram 机器人
+# SeekNode
 
-基于Cloudflare Workers + Hono + Grammy的RSS监控系统，支持关键词匹配和Telegram通知。
+SeekNode 是运行在 Cloudflare Workers 上的 NodeSeek RSS 关键词订阅 Telegram Bot。
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/ljnchn/seeknode)
+本仓库针对 D1 免费套餐进行了重新设计：RSS 抓取每 5 分钟执行一次，只读取有界的待处理队列；活跃订阅通过一次 JOIN 加载；历史数据按 90 天保留并分批清理。管理任务不暴露公网执行入口。
 
-## 使用准备
+## 运行架构
 
-- cloudflare 账号
-- github 账号
-- telegram bot token
+```text
+Telegram ──POST /webhook──> 命令处理 ──> D1
 
-## 使用步骤
+Worker Cron (每 5 分钟)
+  └─> 抓取 RSS
+      └─> 写入新帖子
+          └─> 读取最多 50 条待处理帖子
+              └─> 匹配活跃订阅并推送
 
-1. 在 telegram 中搜索 @BotFather 并创建一个 bot，复制 bot token 备用
-2. 点击上方按钮部署到 Cloudflare
-3. 按照提示进行配置部署
-4. 在设置 -> 变量和机密 -> 添加变量名称 `BOT_TOKEN` 为上一步复制的 bot token
-5. 访问 worker 域名 + /setup 查看状态
-6. 在 telegram 中发送 /start 注册用户
-
-## 功能特性
-
-- 🤖 **Telegram机器人交互**：完整的命令系统，用户友好的界面
-- 📡 **RSS监控**：自动监控NodeSeek RSS源，解析最新帖子
-- 🔍 **关键词匹配**：支持1-3个关键词的组合匹配
-- 📨 **实时通知**：匹配到关键词时自动发送Telegram消息
-- ⏰ **定时任务**：每1分钟自动检查新帖子
-- 🌐 **HTTP触发**：支持手动触发监控检查
-- 💾 **D1数据库**：存储用户信息、订阅记录和推送日志
-- 🔒 **去重处理**：确保同一帖子不会重复推送
-
-## 系统架构
-
-```
-📁 src/
-├── index.ts          # 主入口文件，路由配置
-├── monitor.ts        # RSS监控核心逻辑
-├── bot-commands.ts   # Telegram机器人命令处理
-├── rss.ts           # RSS解析功能
-└── ...
-
-📁 migrations/
-└── 0001_initial.sql  # 数据库初始化脚本
-
-📁 配置文件
-├── wrangler.jsonc    # Cloudflare Workers配置
-├── package.json      # 项目依赖
-└── tsconfig.json     # TypeScript配置
+Worker Cron (每天一次)
+  └─> 分批删除 90 天前的帖子和推送日志
 ```
 
-## 数据库设计
+## 安全边界
 
-### users 表
-- 存储Telegram用户信息
-- 管理订阅限制和账户状态
+- `/webhook` 只接受带正确 `X-Telegram-Bot-Api-Secret-Token` 的 Telegram 请求。
+- `/admin/*` 要求 `Authorization: Bearer <ADMIN_TOKEN>`。
+- 不提供 `/monitor/check`、`/monitor/push`、`/monitor/cleanup` 或 `/debug` 公网入口。
+- 定时任务仅由 Cloudflare Worker Cron 在内部调用。
 
-### keywords_sub 表  
-- 存储用户的关键词订阅
-- 支持1-3个关键词的组合匹配
+## D1 优化
 
-### push_logs 表
-- 记录所有推送日志
-- 去重防止重复通知
+- `posts(is_push, created_at)`：按时间读取最多 50 条待处理帖子，避免全表扫描。
+- `keywords_sub(is_active, user_id)`：一次 JOIN 获取全部活跃订阅，消除 N+1 查询。
+- `push_logs(chat_id, post_id)` 唯一索引：推送前先预留记录，避免重复通知。
+- 新帖子按 `post_id` 批量检查和写入。
+- 无用户、无订阅和无关键词匹配时也会完成帖子状态。
+- 清理任务每次每表最多删除 1,000 条，控制 D1 写入峰值。
 
-## 机器人命令
+个人规模使用时，预期读取量通常为每天数万到数十万行，显著低于 D1 Free 每天 500 万行额度。实际用量取决于 RSS 条目数、用户数和订阅数，请使用 `wrangler d1 insights` 持续观察。
 
-### 基础命令
-- `/start` - 注册用户并显示欢迎信息
-- `/help` - 显示详细帮助信息
-- `/info` - 查看用户信息和订阅统计
-- `/status` - 查看服务运行状态
+## 部署
 
-### 订阅管理
-- `/list` - 查看当前所有订阅
-- `/add 关键词1 [关键词2] [关键词3]` - 添加关键词订阅
-- `/remove 订阅ID` - 删除指定订阅
+完整步骤见 [SETUP.md](SETUP.md)。核心命令：
 
-### 使用示例
-```
-/add 服务器                    # 监控包含"服务器"的帖子
-/add VPS 优惠                  # 监控同时包含"VPS"和"优惠"的帖子  
-/add 服务器 免费 教程           # 监控同时包含这三个关键词的帖子
-/remove 123                   # 删除ID为123的订阅
-```
-
-## API接口
-
-### RSS相关
-- `GET /rss/posts` - 获取RSS数据
-- `GET /rss/status` - RSS服务状态
-- `GET /rss/test` - RSS连接测试
-
-### 监控相关
-- `GET /monitor/check` - 手动触发监控检查
-- `POST /monitor/check` - 手动触发监控检查  
-- `GET /monitor/status` - 监控服务状态
-
-### 机器人相关
-- `POST /webhook` - Telegram webhook处理
-- `GET /debug` - 调试信息
-- `GET /` - 健康检查
-
-## 部署指南
-
-### 1. 环境准备
 ```bash
-# 安装依赖
-pnpm install
-
-# 安装Wrangler CLI
-npm install -g wrangler
+corepack pnpm install
+npx wrangler d1 migrations apply seeknode --remote
+npx wrangler secret put BOT_TOKEN
+npx wrangler secret put TELEGRAM_WEBHOOK_SECRET
+npx wrangler secret put ADMIN_TOKEN
+npx wrangler deploy
 ```
 
-### 2. 配置环境变量
+部署后，用管理密钥设置 Telegram Webhook：
+
 ```bash
-# 设置Telegram Bot Token
-wrangler secret put BOT_TOKEN
-
-# 配置其他环境变量
-# 在wrangler.jsonc中配置D1数据库
+curl -X POST "https://<worker-domain>/admin/webhook" \
+  -H "Authorization: Bearer <ADMIN_TOKEN>"
 ```
 
-### 3. 数据库设置
+## 开发验证
+
 ```bash
-# 创建D1数据库
-wrangler d1 create seeknode-prod
-
-# 运行数据库迁移
-wrangler d1 migrations apply seeknode-prod
+corepack pnpm typecheck
+corepack pnpm test
+npx wrangler deploy --dry-run
 ```
-
-### 4. 部署应用
-```bash
-# 开发环境
-pnpm run dev
-
-# 生产部署
-pnpm run deploy
-```
-
-### 5. 配置Telegram Webhook
-```bash
-# 设置webhook URL
-curl -X POST "https://api.telegram.org/bot<YOUR_BOT_TOKEN>/setWebhook" \
-     -H "Content-Type: application/json" \
-     -d '{"url": "https://your-worker-domain.workers.dev/webhook"}'
-```
-
-## 定时任务配置
-
-系统配置为每1分钟自动执行一次RSS监控：
-
-```jsonc
-// wrangler.jsonc
-{
-  "triggers": {
-    "crons": [
-      "*/1 * * * *"  // 每1分钟执行一次
-    ]
-  }
-}
-```
-
-### 自定义频率
-可以根据需要修改cron表达式：
-- `"*/5 * * * *"` - 每5分钟
-- `"0 * * * *"` - 每小时
-- `"0 */2 * * *"` - 每2小时
-
-## 监控流程
-
-1. **定时触发**：每1分钟自动执行或手动HTTP触发
-2. **获取RSS**：从NodeSeek获取最新RSS数据
-3. **解析帖子**：提取帖子标题、描述、分类等信息
-4. **用户遍历**：获取所有活跃用户和他们的订阅
-5. **关键词匹配**：检查帖子内容是否匹配用户关键词
-6. **去重检查**：确保同一帖子不会重复推送
-7. **发送通知**：向匹配用户发送Telegram消息
-8. **记录日志**：保存推送记录到数据库
-
-## 开发说明
-
-### 本地开发
-```bash
-# 启动开发服务器
-pnpm run dev
-
-# 使用开发环境配置
-pnpm run dev:config
-```
-
-### 数据库操作
-```bash
-# 创建开发数据库
-pnpm run db:create:dev
-
-# 运行开发环境迁移
-pnpm run db:migrate:dev
-```
-
-### 类型生成
-```bash
-# 生成Cloudflare类型
-pnpm run cf-typegen
-```
-
-## 注意事项
-
-1. **频率限制**：避免过于频繁的RSS请求
-2. **错误处理**：完善的异常捕获和日志记录
-3. **数据清理**：定期清理过期的推送日志
-4. **用户限制**：每个用户最多5个订阅，防止滥用
-5. **安全性**：妥善保管Bot Token和数据库配置
-
-## 许可证
-
-MIT License
-
-## 支持
-
-如有问题，请查看：
-1. Cloudflare Workers文档
-2. Grammy机器人框架文档  
-3. Hono框架文档
